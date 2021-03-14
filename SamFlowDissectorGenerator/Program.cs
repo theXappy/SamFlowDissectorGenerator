@@ -11,7 +11,7 @@ namespace SamFlowDissectorGenerator
     class Program
     {
         private static string DISSECTOR_VAR = "p_sam" + "sung_flow_priv";
-        private static string FLOW_DISSECTOR_TEMPALTE_PATH = "flow_dissector_template.lua"; // TODO: Make CMD arg
+        private static string FLOW_DISSECTOR_TEMPALTE_PATH = "flow_dissector.lua.template"; // TODO: Make CMD arg
 
         static void Main(string[] args)
         {
