@@ -1246,7 +1246,7 @@ function p_sam_flow_bc.dissector(buf, pkt, tree)
 		
 		tcp_port_table = DissectorTable.get("tcp.port")
 		if notif_bc_port ~= nil then
-			tcp_port_table:add(notif_bc_port, "%%FLOW_PROTO_VAR%%")
+			tcp_port_table:add(notif_bc_port, %%FLOW_PROTO_VAR%%)
 		end
 		tcp_port_table:add(auth_port, p_sam_flow_auth)
 		
