@@ -848,12 +848,25 @@ end
 local p_sam_flow_data = Proto("flow_data", "Sam" .. "sung Flow Protocol Data");
 
 local f_data_flow_dummy = ProtoField.string("flow", "Dummy")
+local f_data_file_name = ProtoField.string("flow.data_file_name", "File Name")
+
+local e_data_dec_missing_param = ProtoExpert.new("flow.exp.decmissingparam", "Missing Decryption Parameter", expert.group.DECRYPTION, expert.severity.NOTE)
+
+p_sam_flow_data.experts = {
+	e_data_dec_missing_param
+}
 
 p_sam_flow_data.fields = {
 	f_data_flow_dummy,
+	f_data_file_name,
 }
 
 tcp_flags_psh = Field.new("tcp.flags.push")
+
+-- Used to hint the content of a data channel (as seen in the signaling in the 'flow private' connection)
+data_channels_file_names_hints = { }
+-- Used to map the content of a data channel (as seen in the signaling in the 'flow private' connection)
+data_channels_file_names = { }
 
 -- Used to count amount of packets in every data channel so we avoid "heavy" ones
 -- Keys are ports, values are unique packet counters
@@ -879,12 +892,12 @@ function p_sam_flow_data.dissector(buf, pkt, tree)
 		data_channels_packet_counters[pkt.src_port] = last_counter + 1
 
 		-- Packets count threshold
-		if data_channels_packet_counters[pkt.src_port] > 50 then
+		if data_channels_packet_counters[pkt.src_port] > 100 then
 			forbidden_channels[pkt.src_port] = true
 		end
 
 		-- Total payload length treshold
-		if buf:len() > 10000 then
+		if buf:len() > 1000000 then
 			forbidden_channels[pkt.src_port] = true
 		end
 	end
@@ -926,14 +939,14 @@ function p_sam_flow_data.dissector(buf, pkt, tree)
 	iv = string.fromhex(global_flow_settings.iv)
 	local ivBytes = {string.byte(iv,1,#iv)}
 	
-	if #key ~= 32 or #iv ~= 32 then
-		pkt.cols.info:append('[Encrypted Private Data Channel]')
+	if #key ~= 16 or #iv ~= 16 then
+		pkt.cols.info:set('[Encrypted Private Data Channel]')
 		if #key == 0 then
-			subtree:add_proto_expert_info(e_private_dec_missing_param,"Data is encrypted and a key was not set in the preferences.")
+			subtree:add_proto_expert_info(e_data_dec_missing_param,"Data is encrypted and a key was not set in the preferences.")
 		elseif #iv == 0 then	
-			subtree:add_proto_expert_info(e_private_dec_missing_param,"Data is encrypted and an iv was not set in the preferences.")
+			subtree:add_proto_expert_info(e_data_dec_missing_param,"Data is encrypted and an iv was not set in the preferences.")
 		else
-			subtree:add_proto_expert_info(e_private_dec_missing_param,"Data is encrypted and a key/iv from the preferences was not 16 bytes in hex.")
+			subtree:add_proto_expert_info(e_data_dec_missing_param,"Data is encrypted and a key/iv from the preferences was not 16 bytes in hex. " .. tostring(#key) .. ", " .. tostring(#iv))
 		end
 		return
 	end
@@ -947,6 +960,19 @@ function p_sam_flow_data.dissector(buf, pkt, tree)
 	local json_bytes = ByteArray.new(decrypted_str, true)
 	local json_tvb = json_bytes:tvb("Decrypted Payload")
 	local dec_json_ti = subtree:add(json_tvb:range(),"Decrypted Payload")
+	
+	-- Trying to get filename and show in tree
+	file_name = data_channels_file_names[pkt.src_port]
+	if not file_name then 
+		-- table.remove is like Dequeue
+		file_name = table.remove(data_channels_file_names_hints)
+		-- Associate hinted file name with current TCP connection.
+		-- Next time this function runs the name will be retrieved from data_channels_file_names
+		data_channels_file_names[pkt.src_port] = file_name
+	end
+	subtree:add(f_data_file_name, file_name):set_generated()
+	pkt.cols.info:set("Contents of file '" .. file_name .. "'")
+	
 
 end
 
@@ -1139,6 +1165,37 @@ end
 function title_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
 	pkt.cols.info:append(' Title: "' .. parsed_value .. '"')
 end
+
+-- 3 Functions below allow recognizing ports in 'SocketServerInfoData' field so we can call flow_data dissector
+is_in_sockData = false
+function socketServerInfoData_pre(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+	is_in_sockData = true;
+end
+function socketServerInfoData_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+	is_in_sockData = false;
+end
+function port_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+	if is_in_sockData and parsed_value ~= nil then
+		tcp_port_table = DissectorTable.get("tcp.port")
+		tcp_port_table:add(parsed_value, p_sam_flow_data)
+	end
+end
+
+-- 3 Functions below allow passing file name to data channel (different TCP connection from the signaling (private) channel we are on)
+is_in_fileInfo = false;
+function fileInfoData_pre(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+	is_in_fileInfo = true;
+end
+function fileInfoData_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+	is_in_fileInfo = false;
+end
+function fileName_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+	if is_in_fileInfo and parsed_value ~= nil then
+		-- table.insert is like Enqueue
+		table.insert(data_channels_file_names_hints, parsed_value)
+	end
+end
+
 
 -- Post/Pre fields delegates END
 
