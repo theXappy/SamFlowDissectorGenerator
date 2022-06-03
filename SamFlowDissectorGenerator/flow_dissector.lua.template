@@ -843,8 +843,13 @@ function p_sam_flow_auth.dissector(buf, pkt, tree)
 		pkt.cols.info:append(operation)
 
 		
+		pkt.cols.info:fence()
+		pkt.cols.protocol:fence()
 		-- Hand over data to JSON dissector
 		json_dis(json_tvb,pkt,tree);
+		-- Clear usless column string added by json dissector 
+		pkt.cols.info:clear()
+		pkt.cols.protocol:clear()
 end
 
 
@@ -1145,8 +1150,13 @@ function %%FLOW_PROTO_VAR%%.dissector(buf, pkt, tree)
 		end
 		generic_dissect_root(json_tvb, pkt, subtree, sender_entity, json_text, %%PRIV_JSON_ROOT_ELEMENT_FINFOS%% )
 		
+		pkt.cols.info:fence()
+		pkt.cols.protocol:fence()
 		-- Hand over data to JSON dissector
 		json_dis(json_tvb,pkt,tree);
+		-- Clear usless column string added by json dissector 
+		pkt.cols.info:clear()
+		pkt.cols.protocol:clear()
 end
 
 
@@ -1330,8 +1340,13 @@ function p_sam_flow_bc.dissector(buf, pkt, tree)
 		end
 		tcp_port_table:add(auth_port, p_sam_flow_auth)
 		
+		pkt.cols.info:fence()
+		pkt.cols.protocol:fence()
 		-- Hand over data to JSON dissector
 		json_dis(json_tvb,pkt,tree);
+		-- Clear usless column string added by json dissector 
+		pkt.cols.info:clear()
+		pkt.cols.protocol:clear()
 end
 
 
