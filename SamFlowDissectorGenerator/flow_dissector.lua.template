@@ -396,7 +396,7 @@ function finfo_get_sub_finfos(json_field_info)
 	return json_field_info[4]
 end
 
-function generic_dissect(buf, pkt, subtree, text, json_field_info)
+function generic_dissect(buf, pkt, subtree, sender_entity, text, json_field_info)
 	local json_field_name = finfo_get_json_field_name(json_field_info)
 	local proto_field = finfo_get_proto_field(json_field_info)
 	local json_field_type = finfo_get_json_field_type(json_field_info)
@@ -409,7 +409,7 @@ function generic_dissect(buf, pkt, subtree, text, json_field_info)
 		local post_func_name = json_field_name .. "_pre"
 		local post_func_ptr = _G[post_func_name]
 		if post_func_ptr ~= nil then
-			post_func_ptr(buf, pkt, subtree, text, json_field_info)
+			post_func_ptr(buf, pkt, subtree, sender_entity, text, json_field_info)
 		end
 	end
 
@@ -425,7 +425,7 @@ function generic_dissect(buf, pkt, subtree, text, json_field_info)
 		local value_tvb = ByteArray.new(value,true):tvb(json_field_name)
 
 		for i,finfo in pairs(sub_finfos) do
-			generic_dissect(value_tvb, pkt, ti, value, finfo)
+			generic_dissect(value_tvb, pkt, ti, sender_entity, value, finfo)
 		end
 	end
 
@@ -447,7 +447,7 @@ function generic_dissect(buf, pkt, subtree, text, json_field_info)
 				-- Making a new TVB and trying to dissect it further for every subfield
 				local value_tvb = ByteArray.new(value,true):tvb(json_field_name .. " Item " .. i)
 				for i,finfo in pairs(sub_finfos) do
-					generic_dissect(value_tvb, pkt, ti, value, finfo)
+					generic_dissect(value_tvb, pkt, ti, sender_entity, value, finfo)
 				end
 			end
 			i = i + 1
@@ -458,15 +458,15 @@ function generic_dissect(buf, pkt, subtree, text, json_field_info)
 	local post_func_name = json_field_name .. "_post"
 	local post_func_ptr = _G[post_func_name]
 	if post_func_ptr ~= nil then
-		post_func_ptr(buf, pkt, subtree, text, json_field_info, value, ti)
+		post_func_ptr(buf, pkt, subtree, sender_entity, text, json_field_info, value, ti)
 	end
 end
 
-function generic_dissect_root(buf, pkt, subtree, text, json_field_infos_table)	
+function generic_dissect_root(buf, pkt, subtree, sender_entity, text, json_field_infos_table)	
 	for i, finfo in ipairs(json_field_infos_table) do
 		for j, val in ipairs(finfo) do
 		end
-		generic_dissect(buf, pkt, subtree, text, finfo)
+		generic_dissect(buf, pkt, subtree, sender_entity, text, finfo)
 	end
 end
 
@@ -827,13 +827,17 @@ function p_sam_flow_auth.dissector(buf, pkt, tree)
 		subtree:add(json_tvb:range(),"Plaintext JSON");
 		
 		-- Dissect JSON structure
-		generic_dissect_root(json_tvb, pkt, subtree, plaintext_str, auth_message_finfos)
+		local sender_entity = ENTITY_PC
+		if(known_mobile_auth_ports[pkt.src_port]) then
+			sender_entity = ENTITY_MOBILE
+		end
+		generic_dissect_root(json_tvb, pkt, subtree, sender_entity, plaintext_str, auth_message_finfos)
 
 		-- Add operation to info column
 		local operation = get_field_val_safe(fi_flow_op)
 		if operation == nil then
 			subtree:add_proto_expert_info(e_auth_no_op, "Opertion field missing from JSON")
-			operation = "NO OP !"
+			operation = "<MISSING OPERATION TYPE !>"
 		end
 		-- Append auth message type to info col
 		pkt.cols.info:append(operation)
@@ -864,9 +868,9 @@ p_sam_flow_data.fields = {
 tcp_flags_psh = Field.new("tcp.flags.push")
 
 -- Used to hint the content of a data channel (as seen in the signaling in the 'flow private' connection)
-data_channels_file_names_hints = { }
+data_channels_file_infos_hints = { }
 -- Used to map the content of a data channel (as seen in the signaling in the 'flow private' connection)
-data_channels_file_names = { }
+data_channels_file_infos = { }
 
 -- Used to count amount of packets in every data channel so we avoid "heavy" ones
 -- Keys are ports, values are unique packet counters
@@ -962,16 +966,17 @@ function p_sam_flow_data.dissector(buf, pkt, tree)
 	local dec_json_ti = subtree:add(json_tvb:range(),"Decrypted Payload")
 	
 	-- Trying to get filename and show in tree
-	file_name = data_channels_file_names[pkt.src_port]
-	if not file_name then 
+	local file_info = data_channels_file_infos[pkt.src_port]
+	if not file_info then 
 		-- table.remove is like Dequeue
-		file_name = table.remove(data_channels_file_names_hints)
+		file_info = table.remove(data_channels_file_infos_hints)
 		-- Associate hinted file name with current TCP connection.
-		-- Next time this function runs the name will be retrieved from data_channels_file_names
-		data_channels_file_names[pkt.src_port] = file_name
+		-- Next time this function runs the name will be retrieved from data_channels_file_infos
+		data_channels_file_infos[pkt.src_port] = file_info
 	end
-	subtree:add(f_data_file_name, file_name):set_generated()
-	pkt.cols.info:set("Contents of file '" .. file_name .. "'")
+	subtree:add(f_data_file_name, file_info.file_name):set_generated()
+	pkt.cols.info:set("[" .. entity_values[file_info.sender_entity] .. "] ")
+	pkt.cols.info:append("Contents of file '" .. file_info.file_name .. "'")
 	
 
 end
@@ -1134,7 +1139,11 @@ function %%FLOW_PROTO_VAR%%.dissector(buf, pkt, tree)
 		
 		
 		local json_text = res
-		generic_dissect_root(json_tvb, pkt, subtree, json_text, %%PRIV_JSON_ROOT_ELEMENT_FINFOS%% )
+		local sender_entity = ENTITY_PC
+		if(known_mobile_priv_ports[pkt.src_port]) then
+			sender_entity = ENTITY_MOBILE
+		end
+		generic_dissect_root(json_tvb, pkt, subtree, sender_entity, json_text, %%PRIV_JSON_ROOT_ELEMENT_FINFOS%% )
 		
 		-- Hand over data to JSON dissector
 		json_dis(json_tvb,pkt,tree);
@@ -1142,57 +1151,71 @@ end
 
 
 -- Post/Pre fields delegates
+-- Function arguments documentation:
+--	buf - Current TVBUF
+--	pkt - Pinfo
+--	subtree - Parent TreeItem
+--	sender_entity - Either ENTITY_PC or ENTITY_MOBILE
+--	text - string, ASCII extracted from the JSON for current field
+--	json_field_info - JSON 'finfo' as described in this file. It's a table with inner fields details
+--	parsed_value - [_post ONLY] parsed value depending on the JSON field type (number, string, etc...)
+--	created_ti - [_post ONLY] Created TreeItem for this field
 
-function CMD_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function CMD_post(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	-- Adding command type to INFO column
 	pkt.cols.info:append(parsed_value)
 end
 
-function notificationData_pre(buf, pkt, subtree, text, json_field_info)
+function notificationData_pre(buf, pkt, subtree, sender_entity, text, json_field_info)
 	-- Adding '(' to INFO column
 	pkt.cols.info:append(' (')
 end
 
-function notificationData_post(buf, pkt, subtree, text, json_field_info)
+function notificationData_post(buf, pkt, subtree, sender_entity, text, json_field_info)
 	-- Adding ')' to INFO column
 	pkt.cols.info:append(')')
 end
 
-function applicationName_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function applicationName_post(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	pkt.cols.info:append('App: "' .. parsed_value .. '"')
 end
 
-function title_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function title_post(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	pkt.cols.info:append(' Title: "' .. parsed_value .. '"')
 end
 
 -- 3 Functions below allow recognizing ports in 'SocketServerInfoData' field so we can call flow_data dissector
 is_in_sockData = false
-function socketServerInfoData_pre(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function socketServerInfoData_pre(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	is_in_sockData = true;
 end
-function socketServerInfoData_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function socketServerInfoData_post(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	is_in_sockData = false;
 end
-function port_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function port_post(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	if is_in_sockData and parsed_value ~= nil then
 		tcp_port_table = DissectorTable.get("tcp.port")
 		tcp_port_table:add(parsed_value, p_sam_flow_data)
 	end
 end
 
--- 3 Functions below allow passing file name to data channel (different TCP connection from the signaling (private) channel we are on)
+-- 3 Functions below allow passing file name & sender to data channel (different TCP connection from the signaling (private) channel we are on)
 is_in_fileInfo = false;
-function fileInfoData_pre(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function fileInfoData_pre(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	is_in_fileInfo = true;
 end
-function fileInfoData_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function fileInfoData_post(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	is_in_fileInfo = false;
 end
-function fileName_post(buf, pkt, subtree, text, json_field_info, parsed_value, created_ti)
+function fileName_post(buf, pkt, subtree, sender_entity, text, json_field_info, parsed_value, created_ti)
 	if is_in_fileInfo and parsed_value ~= nil then
 		-- table.insert is like Enqueue
-		table.insert(data_channels_file_names_hints, parsed_value)
+		table.insert(data_channels_file_infos_hints,
+						{
+							['file_name'] = parsed_value,
+							['sender_entity']=sender_entity
+						}
+					)
 	end
 end
 

@@ -30,10 +30,10 @@ namespace SamFlowDissectorGenerator
 
             // Get All types (recursively) used by the root type
             // Only Sam'sung Flow types are collected (so .NET types like 'int' or 'string' aren't)
-            List<TypeAndDependencies> typesAndDeps = typesExplorer.GetFlowTypes();
+            List<TypeAndDependencies> typesAndDeps = typesExplorer.GetFlowTypes(false);
             // Export dependencies graph (disabled...)
-            //DependenciesGraphExporter exp = new DependenciesGraphExporter();
-            //exp.Export(typesAndDeps);
+            DependenciesGraphExporter exp = new DependenciesGraphExporter();
+            exp.Export(typesAndDeps);
 
             // Sort the types in topological order
             Queue<TypeAndDependencies> sortedTypes = typesSorter.TopologicalSort(typesAndDeps);

@@ -26,14 +26,14 @@ namespace SamFlowDissectorGenerator
             graph.Edges.Attributes.Color = (new DotColor(Color.FromArgb(57, 80, 93)));
             graph.Edges.Attributes.Width = 4.0;
 
-            graph.Nodes.AddRange(typeAndDependencieses.Select(tAndD => tAndD.SelfType.Name));
+            graph.Nodes.AddRange(typeAndDependencieses.Select(tAndD => tAndD.SelfType.FullName.Replace(".","\n")));
 
             // Make single-rank 'subgraph' of all nodes
             //graph.Subgraphs.AddWithNodes(DotRank.Same, (list.Select(tAndD => tAndD.SelfType.Name)));
 
             foreach (var tAndD in typeAndDependencieses)
             {
-                graph.Edges.AddOneToMany(tAndD.SelfType.Name, tAndD.Dependencies.Select(type => type.Name));
+                graph.Edges.AddOneToMany(tAndD.SelfType.FullName.Replace(".","\n"), tAndD.Dependencies.Select(type => type.FullName.Replace(".","\n")));
             }
 
             string dotPath = PathAdv.WriteTempFile(graph.Build(), "dot");

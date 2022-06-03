@@ -20,7 +20,7 @@ namespace SamFlowDissectorGenerator
             return rootType;
         }
 
-        public List<TypeAndDependencies> GetFlowTypes()
+        public List<TypeAndDependencies> GetFlowTypes(bool onlySams=true)
         {
             BindingFlags allFlags = (BindingFlags)0xffff;
             Type rootType = GetRootType();
@@ -39,10 +39,10 @@ namespace SamFlowDissectorGenerator
                 // New type discovered!
                 discoveredTypeDependencies[currType] = new HashSet<Type>();
 
-                PropertyInfo[] properties = currType.GetProperties(allFlags);
-                foreach (PropertyInfo propInfo in properties)
+                FieldInfo[] properties = currType.GetFields(allFlags);
+                foreach (FieldInfo propInfo in properties)
                 {
-                    Type propType = propInfo.PropertyType;
+                    Type propType = propInfo.FieldType;
                     if (propType.IsEnum)
                     {
                         // I don't care about enums. They're as good as numbers to me.
@@ -57,7 +57,7 @@ namespace SamFlowDissectorGenerator
 
                     }
 
-                    if (propType.FullName != null && propType.FullName.Contains("Flow"))
+                    if (propType.FullName != null && (!onlySams || propType.FullName.Contains("Flow")))
                     {
                         typesToExploreStack.Push(propType);
                         discoveredTypeDependencies[currType].Add(propType);
