@@ -33,7 +33,8 @@ namespace SamFlowDissectorGenerator
             List<TypeAndDependencies> typesAndDeps = typesExplorer.GetFlowTypes();
             // Export dependencies graph (disabled...)
             DependenciesGraphExporter exp = new DependenciesGraphExporter();
-            exp.Export(typesAndDeps);
+            if(args.Any(arg => arg == "--export-dot"))
+                exp.Export(typesAndDeps);
 
             // Sort the types in topological order
             Queue<TypeAndDependencies> sortedTypes = typesSorter.TopologicalSort(typesAndDeps);
